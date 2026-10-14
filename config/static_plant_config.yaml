@@ -1,0 +1,106 @@
+# Port of Config\Secure (agent.md §4.3). Duplicate keys are last-wins, as in PHP (D-12).
+#
+# `plants` (55 entries) was derived from the connection groups of the legacy Database.php:
+# every Postgre group except `kosan` (legacy default), `testplant` and `jodhpur` (which §4.3
+# says is absent from `plants`). Only the short_name keys are authoritative. The values are
+# the slug in Title Case because Database.php carries no display names; replace them with the
+# names from Config\Secure before relying on E01 `text`.
+#
+# `carousal_config` is NOT in Database.php and is still empty. It must be ported verbatim from
+# Config\Secure (kota -> {1: heads 24, stdOutput 1800}, jammu -> {1: 24/1630}, jodhpur present).
+# Until then every plant is treated as unconfigured by the scale-efficiency features (§5.5.2).
+#
+# No hosts or credentials belong in this file; they live in the central `plants` table.
+plants:
+  ajmer: Ajmer
+  anantapur: Anantapur
+  aurangabad: Aurangabad
+  bahadurgarh: Bahadurgarh
+  barhi: Barhi
+  bhatinda: Bhatinda
+  bhopal: Bhopal
+  chakan: Chakan
+  champaran: Champaran
+  chandrapur: Chandrapur
+  cherlapalli: Cherlapalli
+  gandhinagar: Gandhinagar
+  goa: Goa
+  goalpara: Goalpara
+  gonda: Gonda
+  gorakhpur: Gorakhpur
+  gummidipoondi: Gummidipoondi
+  hazarwadi: Hazarwadi
+  hazira: Hazira
+  hoshiarpur: Hoshiarpur
+  hubli: Hubli
+  indore: Indore
+  jabalpur1: Jabalpur1
+  jabalpur2: Jabalpur2
+  jammu: Jammu
+  jamshedpur: Jamshedpur
+  jatni: Jatni
+  jind: Jind
+  khapri: Khapri
+  kochi: Kochi
+  kondapalli: Kondapalli
+  kota: Kota
+  loni: Loni
+  madurai: Madurai
+  mahul: Mahul
+  mangalore: Mangalore
+  mysore: Mysore
+  nashik: Nashik
+  paharpur: Paharpur
+  palghat: Palghat
+  pampore: Pampore
+  panagarh: Panagarh
+  patalganga: Patalganga
+  patna: Patna
+  pindwara: Pindwara
+  purnea: Purnea
+  raipur: Raipur
+  rajahmundry: Rajahmundry
+  rayagada: Rayagada
+  sitarganj: Sitarganj
+  unnao: Unnao
+  usar: Usar
+  visakh: Visakh
+  warangal: Warangal
+  yediyur: Yediyur
+
+plant_name: "Mysore LPG Plant"
+
+carousal_speed:
+  1: 50
+  2: 48
+
+interruption_to_exclude_minutes: 5
+
+plants_with_device_id:
+  - anantapur
+  - visakh
+  - rajahmundry
+  - chakan
+  - cherlapalli
+  - kondapalli
+  - warangal
+  - jodhpur
+  - ajmer
+  - jatni
+  - bhatinda
+  - bahadurgarh
+  - hazarwadi
+  - barhi
+  - loni
+  - champaran
+  - patalganga
+  - goa
+  - usar
+  - hoshiarpur
+  - indore
+  - gummidipoondi
+
+plants_with_48_head:
+  chakan: [1]
+
+carousal_config: {}

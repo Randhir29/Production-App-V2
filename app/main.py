@@ -31,6 +31,8 @@ from app.core.db import (
     create_central_engine,
     create_central_sessionmaker,
 )
+from app.core.errors import AppError
+from app.domain.static_config import load_static_config
 
 logger = logging.getLogger("prodash.main")
 
@@ -106,11 +108,16 @@ async def _validation_exception_handler(request: Request, exc: Exception) -> JSO
     errors = jsonable_encoder(exc.errors(), exclude={"input", "ctx", "url"})
     return _error_response(
         request,
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        422,
         "VALIDATION_ERROR",
         "Request validation failed",
         {"errors": errors},
     )
+
+
+async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, AppError)
+    return _error_response(request, exc.http_status, exc.code, exc.message, exc.details)
 
 
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -136,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_event_loop_policy()
         _configure_logging(cfg)
+        load_static_config(cfg.static_plant_config_path)  # fail fast on a missing/invalid file
         engine = create_central_engine(cfg)
         app.state.settings = cfg
         app.state.central_engine = engine
@@ -180,6 +188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    app.add_exception_handler(AppError, _app_error_handler)
     app.add_exception_handler(Exception, _unhandled_exception_handler)
 
     app.include_router(v1_api.router, prefix=cfg.api_v1_prefix)

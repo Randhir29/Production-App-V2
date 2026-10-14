@@ -19,7 +19,9 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.32",
+    "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.1.4",
+    "tzdata>=2024.1",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -28,6 +30,7 @@ prodash-api = "prodash_api:main"
 
 [project.optional-dependencies]
 dev = [
+    "aiosqlite>=0.22.1",
     "mypy>=1.10",
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
@@ -41,13 +44,17 @@ line-length = 110
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
-module = ["jose", "jose.*", "passlib", "passlib.*"]
+module = ["jose", "jose.*", "passlib", "passlib.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: needs a disposable PostgreSQL (pg-test)",
+    "parity: compares against golden JSON captured from the PHP app",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

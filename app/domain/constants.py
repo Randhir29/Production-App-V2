@@ -1,0 +1,40 @@
+"""Business constants (agent.md §5.1). Bound as parameters; never re-typed inline in SQL."""
+
+from __future__ import annotations
+
+TZ = "Asia/Kolkata"
+
+CHECK_SCALE_PROCESS_IDS = (2, 22)
+CHECK_SCALE_PRIMARY_ID = (2,)
+NON_OP_DAY_PROCESS_IDS = (1, 2, 22)
+GD_PROCESS_IDS = (3, 23)
+PT_PROCESS_IDS = (4, 24)
+
+NEGATIVE_TARE = (1296, 5392)
+POSITIVE_TARE = (17424,)
+TARE_EXCLUDED = NEGATIVE_TARE + POSITIVE_TARE
+
+CS_SORTOUT_STATUSES = (1040, 2064, 1296, 17424, 1048, 4120, 5392)
+CS_OTHER_ERR_STATUSES = (1041, 1042, 2192, 4112, 4113, 5136, 6160)
+CS_UNDERFILLED, CS_OVERFILLED = 1040, 2064
+CS_NTARE = (1296, 5392)
+CS_PTARE = (17424,)
+CS_TIMEOUT = (1048, 4120)
+
+FILL_ACCEPTED_STATUSES = (0, 1040, 2064)
+
+NOMINAL_NET_G = {1: 14200, 2: 19000}
+EQUIV_19KG = 1.25
+PRODUCTIVITY_ADJUSTMENT_FACTOR = 8.5 / 7.75
+MIN_INTERRUPTION_SECONDS = 60
+DEFAULT_CAROUSELS = (1, 2)  # dashboard and scale endpoints are hard-wired to 1 and 2 (D-10)
+DEFAULT_CYL_TYPES = (1, 2)
+
+GD_DRILL_STATUSES = {0: "ok", 272: "leak"}
+PT_DRILL_STATUSES = {0: "ok", 8208: "leak", 16400: "no-connect", 18: "time-out"}
+
+# Filling statistics resolution and clamp (§5.5.5)
+FILLING_CLAMP_G = 200
+# Accuracy trend variation window (§5.5.6)
+ACCURACY_TREND_RANGE_G = 300
+ACCURACY_TREND_BUCKET_MIN = 15

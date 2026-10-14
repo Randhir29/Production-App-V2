@@ -1198,6 +1198,32 @@ The legacy router reproduces the PHP payloads:
 | **P6 Auth** | User migration, JWT, guards, login rate-limit, `create-admin` CLI, API keys | Legacy users can log in with their existing passwords |
 | **P7 Hardening** | Load test (55 plants × V2 in parallel), slow-query logging, the optional cache, Docker image, runbook | p95 targets agreed with the owner; no plant connection leaks |
 
+### P1 implementation notes (central DB)
+
+* **Baseline mirrors the legacy schema.** `migrations/versions/0001_baseline.py` adds no constraint that §12.1 lists as needing owner sign-off (unique `short_name`, FKs on `carousals`/`breaks`, CHECKs). Legacy-guaranteed uniques on `users.email` and `users.username` are kept. New tables: `roles` (seeded `admin`, `officer`, `viewer`), `user_roles`, `refresh_tokens`.
+* **Alembic lives in `migrations/`** (as §7.2), not `alembic/` as the CLAUDE.md layout sketch says. The URL comes from `CENTRAL_DATABASE_URL`.
+* **`migrate-central-data`** (`python -m app.cli.main migrate-central-data [--confirm]`): dry run by default, rolls back; with `--confirm` it upserts by primary key, so reruns are idempotent and legacy ids are preserved. Rows that cannot be represented are skipped and reported: `carousals` with NULL `heads`/`rated_productivity` or a TIME of 24 h or more, `breaks` with a NULL time, and group memberships with no role mapping or an unknown user. `plants.db_password` is copied unchanged (D-23 still open).
+* **`CarouselConfigService.get_config(plant)`** returns `{carousal_id: {heads, stdOutput, times: {start, end, breaks}}}` in `ORDER BY id`. An unknown plant raises `PlantNotFound`; a plant without carousel rows gives `{}`; `get_carousels` raises `PlantConfigMissing` for that case (§5.7.1).
+* **Open verification:** the exit criterion "matches PHP `getCarousalConfig`" needs golden files in `tests/parity/golden/carousel_config/` (format in `tests/parity/test_carousel_config_parity.py`). Until they are captured the parity test is skipped.
+
+### P2 implementation notes (plant connectivity)
+
+* **Plant access** lives in `app/core/db.py` (`PlantDatabases`: engine cache, read-only sessions, semaphores, 10 s connect timeout, per-connection latency log, unpooled read-write session for the bootstrap only) and `app/services/plant_access.py` (`PlantAccess`: credentials from the central `plants` row, `PlantNotFound` / `PlantUnreachable` / `PlantQueryError` mapping). `app/db/plant_registry.py` from §7.2 is not created; `core/db.py` plays that role.
+* **Gap-function bootstrap (D-21):** `PlantAccess.ensure_gap_functions(plant)` checks `pg_proc` read-only first, creates the two functions over a separate read-write connection only when missing, and caches the result per plant per process. A permission failure is tolerated only when the functions exist, otherwise `PlantFunctionsUnavailable` (502, `PLANT_FUNCTIONS_UNAVAILABLE`). Nothing calls it until P5.
+* **Connectivity (E06, D-13):** static-`plants` membership is checked before any connection; credentials come from the `plants` table. Plant-side errors and a missing probe row give `Connection Error` (HTTP 200); latency is `php_round` of milliseconds from the start of the check.
+* **Legacy paths:** `/zone-maps` is served under `LEGACY_PREFIX` (`/prodash/zone-maps`) like every other legacy route; the PHP app exposed it at the site root for the mailer job. Mount it at the root too if that job cannot be repointed.
+* **Static config:** `domain/static_config.py` and `config/static_plant_config.yaml` exist, but `plants` and `carousal_config` are empty because `Config\Secure` is not in this repository. **Until they are ported verbatim, E01 returns an empty list and E06 answers `Unknown Plant` for every plant.**
+* **Auth guards are not applied yet** (P6); these routes are open as in the legacy app.
+
+### P4 implementation notes (scales and tables)
+
+* **Static config:** `config/static_plant_config.yaml` `plants` (55 entries) was derived from the connection groups of the legacy `Database.php` (all Postgre groups except `kosan`, `testplant`, `jodhpur`). Values are Title-Cased slugs because that file has no display names, and `carousal_config` is still empty because it is not in `Database.php`. **Until `carousal_config` is ported from `Config\Secure`, every plant is treated as unconfigured by §5.5.2, so E19 and E21 use the `carousal_speed` fallback and will differ from PHP for configured plants.**
+* **SQL:** `repositories/plant/production_log_repo.py`. All values bound; the D-01 `hundred_plus` formula is kept verbatim. The count column is aliased `cnt` because `Row.count` is the tuple method.
+* **Guards (D-05):** efficiency or meta with `stdOutput` 0 (carousel absent from the plant's static config, or zero interval) returns 0 and logs a WARNING instead of raising.
+* **v1 validation:** `carousel` and `cyl_type` are bounded ints (0-2 / 1-2) rather than `Literal`, because query and form strings do not coerce to integer literals. Accuracy-trend `from`/`to` must look like `YYYY-MM-DD[ T]HH:MM[:SS]` in both routers; legacy passed any string to SQL (D-07).
+* **Legacy error payloads (assumption, verify against PHP):** E19/E20 return `{"exception_type": "...DatabaseException"}` and E21-E24 return `{status: failure, error: "Unable to connect to selected Plant!", th: {}}` on any plant error, mirroring §5.3 and §5.7.7. `rowCount` 0 falls back to the endpoint default (10 / 5).
+* **Not covered here:** SQL against a real PostgreSQL (needs the `pg-test` integration database, §9.2) and golden parity for E19-E24 (needs PHP captures plus seeded plant data).
+
 ---
 
 ## 11. Legacy defect and quirk register

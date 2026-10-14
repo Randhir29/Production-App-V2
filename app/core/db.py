@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings
 
@@ -95,6 +96,7 @@ class PlantDatabases:
         self._settings = settings
         self._entries: OrderedDict[PlantKey, _PlantEntry] = OrderedDict()
         self._lock = asyncio.Lock()
+        self._bootstrapped: set[PlantKey] = set()
 
     @staticmethod
     def build_url(host: str, port: int, dbname: str, user: str, password: str) -> URL:
@@ -196,8 +198,51 @@ class PlantDatabases:
             finally:
                 await session.close()
 
+    @asynccontextmanager
+    async def rw_session(
+        self,
+        *,
+        host: str,
+        port: int,
+        dbname: str,
+        user: str,
+        password: str,
+    ) -> AsyncIterator[AsyncSession]:
+        """Yield a short-lived read-write session (unpooled), used only for the PL/pgSQL bootstrap.
+
+        Plant data stays read-only: regular sessions come from ``session()`` (§7.4, §8.4.6).
+        """
+        s = self._settings
+        engine = create_async_engine(
+            self.build_url(host, port, dbname, user, password),
+            poolclass=NullPool,
+            connect_args={
+                "connect_timeout": s.plant_db_connect_timeout_s,
+                "options": f"-c statement_timeout={int(s.plant_db_statement_timeout_ms)}",
+            },
+        )
+        started = time.perf_counter()
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                await session.connection()
+                logger.info(
+                    "plant db rw connection ok host=%s port=%s db=%s latency_ms=%.1f",
+                    host, port, dbname, (time.perf_counter() - started) * 1000,
+                )  # fmt: skip
+                yield session
+        finally:
+            await engine.dispose()
+
+    def is_bootstrapped(self, host: str, port: int, dbname: str, user: str) -> bool:
+        """Whether the gap functions were already verified/created for this plant (D-21)."""
+        return (host, port, dbname, user) in self._bootstrapped
+
+    def mark_bootstrapped(self, host: str, port: int, dbname: str, user: str) -> None:
+        self._bootstrapped.add((host, port, dbname, user))
+
     async def invalidate(self, host: str, port: int, dbname: str, user: str) -> None:
         """Drop and dispose the cached engine for a plant (e.g. after its credentials change)."""
+        self._bootstrapped.discard((host, port, dbname, user))
         async with self._lock:
             entry = self._entries.pop((host, port, dbname, user), None)
         if entry is not None:
