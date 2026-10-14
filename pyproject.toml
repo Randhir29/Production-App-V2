@@ -1,0 +1,54 @@
+[project]
+name = "prodash-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "randhirveerrajput@gmail.com", email = "randhirveerrajput@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiomysql>=0.3.2",
+    "alembic>=1.20.0",
+    "bcrypt==4.0.1",
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "passlib[bcrypt]>=1.7.4",
+    "psycopg[binary]>=3.3.6",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.15.0",
+    "python-jose[cryptography]>=3.5.0",
+    "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+prodash-api = "prodash_api:main"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[tool.ruff]
+line-length = 110
+
+[tool.mypy]
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["jose", "jose.*", "passlib", "passlib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
