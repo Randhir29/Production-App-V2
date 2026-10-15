@@ -1,0 +1,25 @@
+# Local/staging composition. Secrets come from the environment or .env, never from this file.
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Disposable PostgreSQL for repository/integration tests (agent.md §9.2):
+  #   PG_TEST_PASSWORD=... docker compose --profile test up -d pg-test
+  pg-test:
+    image: postgres:16
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: ccc
+      POSTGRES_USER: prodash_test
+      POSTGRES_PASSWORD: ${PG_TEST_PASSWORD:?set PG_TEST_PASSWORD}
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prodash_test -d ccc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

@@ -52,3 +52,19 @@ class PlantQueryError(AppError):
 
     def __init__(self, plant: str) -> None:
         super().__init__(plant=plant)
+
+
+class AuthError(AppError):
+    """Missing, invalid or expired credentials (401)."""
+
+    http_status = 401
+    code = "UNAUTHENTICATED"
+    message = "Authentication required"
+
+
+class PermissionDenied(AppError):
+    """Authenticated but not allowed (403)."""
+
+    http_status = 403
+    code = "FORBIDDEN"
+    message = "You do not have permission to perform this action"

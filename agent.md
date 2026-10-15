@@ -1213,7 +1213,7 @@ The legacy router reproduces the PHP payloads:
 * **Connectivity (E06, D-13):** static-`plants` membership is checked before any connection; credentials come from the `plants` table. Plant-side errors and a missing probe row give `Connection Error` (HTTP 200); latency is `php_round` of milliseconds from the start of the check.
 * **Legacy paths:** `/zone-maps` is served under `LEGACY_PREFIX` (`/prodash/zone-maps`) like every other legacy route; the PHP app exposed it at the site root for the mailer job. Mount it at the root too if that job cannot be repointed.
 * **Static config:** `domain/static_config.py` and `config/static_plant_config.yaml` exist, but `plants` and `carousal_config` are empty because `Config\Secure` is not in this repository. **Until they are ported verbatim, E01 returns an empty list and E06 answers `Unknown Plant` for every plant.**
-* **Auth guards are not applied yet** (P6); these routes are open as in the legacy app.
+* **Auth guards** were applied in P6; see the P6 notes.
 
 ### P4 implementation notes (scales and tables)
 
@@ -1223,6 +1223,44 @@ The legacy router reproduces the PHP payloads:
 * **v1 validation:** `carousel` and `cyl_type` are bounded ints (0-2 / 1-2) rather than `Literal`, because query and form strings do not coerce to integer literals. Accuracy-trend `from`/`to` must look like `YYYY-MM-DD[ T]HH:MM[:SS]` in both routers; legacy passed any string to SQL (D-07).
 * **Legacy error payloads (assumption, verify against PHP):** E19/E20 return `{"exception_type": "...DatabaseException"}` and E21-E24 return `{status: failure, error: "Unable to connect to selected Plant!", th: {}}` on any plant error, mirroring §5.3 and §5.7.7. `rowCount` 0 falls back to the endpoint default (10 / 5).
 * **Not covered here:** SQL against a real PostgreSQL (needs the `pg-test` integration database, §9.2) and golden parity for E19-E24 (needs PHP captures plus seeded plant data).
+
+### P5 implementation notes (reports)
+
+* **Layout:** pure logic in `domain/phases.py`, `domain/rejections.py`, `domain/report_calcs.py`, `domain/mail_rows.py`; SQL in `repositories/plant/sql/report_sql.py` (dynamic builders emit only `:w0_from`-style placeholders, times validated by `TIME_PATTERN`) and `repositories/plant/report_repo.py`; orchestration in `services/reports.py` and `services/mailer.py`. `php_round` now lives in `domain/php_compat.py` and is re-exported from `core/security.py`.
+* **Windows (§5.2):** V1 building blocks and the CS/GD/PT summaries use `D 00:00:00` to `D 23:59:59`; phase, gap and overtime SQL use `D 23:59:59.999`.
+* **Guards:** V2 raises `PlantConfigMissing` (409) for any carousel without shift start/end or without breaks (D-06); `from > to` gives `productionHoursData2: false` and empty V2 productivity (the v1 router rejects it with 422). V1 productivity with `net_hours` 0 gives 0 plus a WARNING (D-05). Legacy V2 plant errors surface as a generic 500 (D-19); legacy V1 returns the failure payload.
+* **Gap functions (D-21):** `ensure_gap_functions` runs before the V2 and mailer queries and is cached per plant.
+* **Assumptions to verify against PHP golden output** (the spec does not pin them down):
+  1. `ot_production_period` filters: `process_id IN (2,22)`, cylinder types (1,2), no status filter, window `D 00:00:00` to `D 23:59:59.999`.
+  2. `productionHoursData2[c]` also carries `total_pre_shift_time` / `total_post_shift_time` (needed by V2 overtime productivity).
+  3. `productivityData2` / mailer `productivityData` shape is `{carousel: {carousal, normal|break|overtime: {total_production, net_hours, productivity}}}`.
+  4. Mail row keys: `isAdditionalCarousel`, `short_name`, `name`, `zone`, `carousel`, `filling_heads`, `carousel_count`, `bottling{14_2kg,19kg,total}`, `productivity{normal,break,overtime}`, `rejections{eld,ort,cs}.percent`.
+  5. CS summary lists every DB carousel (zeros when it has no rows); GD/PT list only carousels with rows.
+  6. `/performance-report` is served under `LEGACY_PREFIX`, with `Access-Control-Allow-Origin: *` on that route only. The API-key / admin-JWT guard of E27 arrives with P6.
+* **Not verified:** the SQL has not run against PostgreSQL (needs `pg-test`, §9.2) and no PHP golden files exist for E25-E27.
+
+### P6 implementation notes (auth)
+
+* **Endpoints (E28):** `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me` in `api/v1/auth.py`; logic in `services/auth.py` (`AuthService`), SQL in `repositories/central/user_repo.py`.
+* **Guards (`api/deps.py`):** `read_access` (viewer / officer / admin; open when `AUTH_ENABLED=false`) is applied to every v1 router except health and auth, and to the whole legacy router. `require_user` and `require_roles(...)` are always enforced, even with `AUTH_ENABLED=false`. E27 (v1 and legacy) uses `mailer_access`: an `X-API-Key` that matches a SHA-256 digest in `SERVICE_API_KEYS` (constant-time, no early exit) or an admin JWT.
+* **Login:** legacy `$2y$` hashes verify unchanged and are re-hashed to cost 12 on success (parity vector in `tests/repositories/test_auth_service.py`). Inactive, banned (`status = 'banned'`, case-insensitive) and soft-deleted users are rejected. Every failure, including a locked account and an unknown user, is the same 401 `Invalid credentials`, and a dummy bcrypt verify equalises timing for unknown users.
+* **Lockout:** `users.failed_login_count` / `users.locked_until` (migration `0002`). `LOGIN_MAX_ATTEMPTS` (default 5) failures lock the account for `LOGIN_LOCKOUT_MINUTES` (default 15); a failure after an expired lock restarts the count. Answering a locked account with the generic 401 avoids confirming that the account exists, at the cost of a clear message for the legitimate user.
+* **Refresh tokens:** stored as SHA-256 digests, rotated on every use; replaying a revoked token revokes all tokens of that user; a disabled user's refresh is refused.
+* **CLI:** `create-admin` (password from a hidden prompt or `--password-stdin`, never argv; minimum 12 characters) and `hash-api-key [--generate]`.
+* **Not covered / deviations:**
+  1. Failed logins for usernames that do not exist are not rate-limited (there is no row to count on); put an IP-level limit on the reverse proxy.
+  2. Access tokens are stateless: a role change or user disable takes effect at the next refresh (<= `ACCESS_TOKEN_EXPIRE_MINUTES`).
+  3. `force_pass_reset` is not enforced (the spec defines no reset flow); the flag is carried over by `migrate-central-data`.
+  4. There is no logout endpoint (not in E28); revoking is done by rotation or by the replay rule.
+  5. RS256 is not supported; `JWT_ALGORITHM` is limited to HS256/384/512.
+
+### P7 implementation notes (hardening and configuration loading)
+
+* **Where plant connection details live:** the central `plants` table (`host_ip`, `db_user`, `db_password`, `db_database`), never the repo, the YAML or the image (D-13, D-23). `import-plant-connections --php Database.php [--create-missing] [--confirm]` parses the legacy file and writes them (dry run by default; reports names and counts only). Non-plant groups (`default`, `tests`, `kosan`, `testplant`) are skipped; `jodhpur` is imported although it is absent from the static `plants` (§4.3). The port is a global setting (`PLANT_DB_PORT`); a different port in the PHP file is reported, not stored.
+* **Carousel configuration source:** `lpg_carousal_details_corrected.csv` (columns `sap_id`, `carousal_id`, `heads`, `rated_productivity`, `production_hrs` = one shift, `breaks`). `sap_id` matches `plants.erp_id`. `import-carousel-config` writes `carousals`/`breaks` (the DB source used by reports, §4.1); `export-static-config` regenerates `carousal_config` in the static YAML (the source used by scale efficiency, §5.5.2) from the same file, so the two sources no longer drift (D-11). Breaks are sorted ascending on import because `configToPhases` assumes ascending order. `max_productivity` / `min_productivity` are parsed but not used by any rule.
+* **Hardening:** slow-query WARNING and per-statement DEBUG timing on central and plant engines (`SLOW_QUERY_MS`, never parameters); per-request access log (`prodash.access`); `/health/ready` also validates the static config (§7.9); optional in-process `TTLCache` (`RESPONSE_CACHE_TTL_S`, default 0) with single-flight, wired only into the dashboard-polled scale reads E19/E20 and never into reports; `Dockerfile`, `.dockerignore` (excludes `Database.php`, CSV and `.env*`), `compose.yaml` (API plus an opt-in `pg-test`), `scripts/load_v2.py` (55 x V2) and `docs/runbook.md`.
+* **Deviation:** §7.9 names KPI and chart endpoints for the cache; those (P3) are not built yet, so it is attached to the scale reads, which are the dashboard-polled endpoints that exist. Wire P3 through `ScaleService._cached` style when it lands.
+* **Not verified:** the image has not been built, the load test has not been run against real plants, and no SQL has run against PostgreSQL (§9.2 `pg-test`). The p95 target is still to be agreed with the owner.
 
 ---
 

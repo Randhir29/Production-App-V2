@@ -33,6 +33,8 @@ class User(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     fullname: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(32))
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Role(Base):

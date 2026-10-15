@@ -4,39 +4,23 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import math
 import re
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import Settings, get_settings
+from app.domain.php_compat import php_round  # noqa: F401  (re-exported)
 
 # ---------------------------------------------------------------------------------------
 # PHP numeric / array compatibility
 # ---------------------------------------------------------------------------------------
 
 _PHP_INT_KEY = re.compile(r"^(0|-?[1-9][0-9]*)$")
-
-
-def php_round(value: float | Decimal, precision: int = 0) -> float:
-    """Round like PHP ``round()``: half away from zero (§8.3, D-16).
-
-    Python's built-in ``round()`` uses banker's rounding on the binary float, which differs.
-    The shortest repr of the float is rounded as a decimal, so ``2.675`` gives ``2.68``.
-    Non-finite values are returned unchanged.
-    """
-    if isinstance(value, float) and not math.isfinite(value):
-        return value
-    number = value if isinstance(value, Decimal) else Decimal(repr(value))
-    quantum = Decimal(1).scaleb(-precision)
-    rounded = abs(number).quantize(quantum, rounding=ROUND_HALF_UP)
-    return float(-rounded if number < 0 else rounded)
 
 
 def _normalise_key(key: Any) -> int | str:

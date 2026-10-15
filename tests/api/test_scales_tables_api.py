@@ -91,6 +91,7 @@ async def env() -> AsyncIterator[tuple[httpx.AsyncClient, ScriptedSession]]:
         _env_file=None,  # type: ignore[call-arg]
         central_database_url="mysql+aiomysql://u:p@h/d",
         jwt_secret_key="k" * 40,
+        auth_enabled=False,
     )
     app = create_app(settings)
 

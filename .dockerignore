@@ -1,0 +1,23 @@
+# Never bake credentials or local data into an image.
+.env
+.env.*
+!.env.example
+app/Database.php
+**/Database.php
+*.csv
+
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+tests
+scripts
+docs
+src
+*.md
+!README.md

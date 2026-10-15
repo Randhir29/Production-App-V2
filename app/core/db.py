@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
-from sqlalchemy import text
-from sqlalchemy.engine import URL
+from sqlalchemy import event, text
+from sqlalchemy.engine import URL, Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -47,9 +47,33 @@ def selector_loop_factory() -> asyncio.AbstractEventLoop:
     return asyncio.SelectorEventLoop()
 
 
+def attach_query_timing(engine: Engine, name: str, slow_ms: int) -> None:
+    """Log every statement's duration (DEBUG) and a WARNING when it exceeds ``slow_ms``.
+
+    Only the first 80 characters of the statement text are logged, whitespace collapsed; bind
+    parameters are never logged (agent.md §7.7).
+    """
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        conn.info.setdefault("_query_started", []).append(time.perf_counter())
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        stack = conn.info.get("_query_started")
+        if not stack:
+            return
+        elapsed_ms = (time.perf_counter() - stack.pop()) * 1000
+        label = " ".join(str(statement).split())[:80]
+        if elapsed_ms >= slow_ms:
+            logger.warning("slow query engine=%s duration_ms=%.1f statement=%s", name, elapsed_ms, label)
+        else:
+            logger.debug("query engine=%s duration_ms=%.1f statement=%s", name, elapsed_ms, label)
+
+
 def create_central_engine(settings: Settings) -> AsyncEngine:
     """Build the pooled async engine for the central DB (MySQL or PostgreSQL)."""
-    return create_async_engine(
+    engine = create_async_engine(
         settings.central_database_url.get_secret_value(),
         pool_size=settings.central_db_pool_size,
         max_overflow=settings.central_db_max_overflow,
@@ -57,6 +81,8 @@ def create_central_engine(settings: Settings) -> AsyncEngine:
         pool_recycle=1800,
         connect_args={"connect_timeout": settings.central_db_connect_timeout_s},
     )
+    attach_query_timing(engine.sync_engine, "central", settings.slow_query_ms)
+    return engine
 
 
 def create_central_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
@@ -126,6 +152,7 @@ class PlantDatabases:
                 ),
             },
         )
+        attach_query_timing(engine.sync_engine, "plant", s.slow_query_ms)
         return _PlantEntry(
             engine=engine,
             sessions=async_sessionmaker(engine, expire_on_commit=False, autoflush=False),

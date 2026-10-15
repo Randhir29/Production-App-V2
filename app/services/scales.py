@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from app.core.cache import TTLCache
 from app.core.timeutils import ms_to_local, resolve_scale_window, to_epoch_seconds
 from app.domain.constants import DEFAULT_CAROUSELS
 from app.domain.scales import (
@@ -32,11 +34,34 @@ def carousels_for_filter(carousal: int) -> tuple[int, ...]:
 class ScaleService:
     """Scale-level efficiency and accuracy for one plant."""
 
-    def __init__(self, access: PlantAccess, static: StaticPlantConfig) -> None:
+    def __init__(self, access: PlantAccess, static: StaticPlantConfig, cache: TTLCache | None = None) -> None:
         self._access = access
         self._static = static
+        self._cache = cache
+
+    async def _cached(self, key: tuple[Any, ...], compute: Callable[[], Awaitable[Any]]) -> Any:
+        if self._cache is None:
+            return await compute()
+        return await self._cache.get_or_compute(key, compute)
 
     async def under_performing(
+        self,
+        plant: str,
+        row_count: int = DEFAULT_UNDER_PERFORMING_ROWS,
+        period_hours: int = 0,
+        from_ts: int = 0,
+        to_ts: int = 0,
+        with_tags: bool = False,
+    ) -> dict[str, Any]:
+        """§5.5.2, optionally served from the response cache (dashboard polling, §7.9)."""
+        key = ("under-performing", plant, row_count, period_hours, from_ts, to_ts, with_tags)
+        result: dict[str, Any] = await self._cached(
+            key,
+            lambda: self._under_performing(plant, row_count, period_hours, from_ts, to_ts, with_tags),
+        )
+        return result
+
+    async def _under_performing(
         self,
         plant: str,
         row_count: int = DEFAULT_UNDER_PERFORMING_ROWS,
@@ -68,6 +93,21 @@ class ScaleService:
         return {"rows": rows, "meta": result.meta}
 
     async def inaccurate(
+        self,
+        plant: str,
+        row_count: int = DEFAULT_INACCURATE_ROWS,
+        period_hours: int = 0,
+        from_ts: int = 0,
+        to_ts: int = 0,
+    ) -> dict[str, Any]:
+        """§5.5.3, optionally served from the response cache (dashboard polling, §7.9)."""
+        key = ("inaccurate", plant, row_count, period_hours, from_ts, to_ts)
+        result: dict[str, Any] = await self._cached(
+            key, lambda: self._inaccurate(plant, row_count, period_hours, from_ts, to_ts)
+        )
+        return result
+
+    async def _inaccurate(
         self,
         plant: str,
         row_count: int = DEFAULT_INACCURATE_ROWS,

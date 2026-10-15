@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.errors import AppError, PlantNotFound
-from app.core.security import php_round
+from app.domain.php_compat import php_round
 from app.domain.static_config import StaticPlantConfig
 from app.repositories.plant.connectivity_repo import ConnectivityRepository
 from app.services.plant_access import PlantAccess

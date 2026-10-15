@@ -79,8 +79,17 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=7, ge=1)
     auth_enabled: bool = Field(default=True)
     service_api_keys: list[str] = Field(
-        default_factory=list, description="Hashed keys for the machine caller of E27."
+        default_factory=list,
+        description="SHA-256 hex digests of the keys accepted for E27 (X-API-Key).",
     )
+    login_max_attempts: int = Field(default=5, ge=1, description="Failures before lockout.")
+    login_lockout_minutes: int = Field(default=15, ge=1)
+
+    # --- response cache ------------------------------------------------------------------
+    response_cache_ttl_s: int = Field(
+        default=0, ge=0, le=300, description="In-process TTL for dashboard-polled reads; 0 = off."
+    )
+    response_cache_max_entries: int = Field(default=1024, ge=1)
 
     # --- HTTP edge ---------------------------------------------------------------------
     cors_origins: list[str] = Field(default_factory=list)

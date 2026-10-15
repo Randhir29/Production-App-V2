@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.config
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -24,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import legacy as legacy_api
 from app.api import v1 as v1_api
+from app.core.cache import TTLCache
 from app.core.config import Settings, get_settings
 from app.core.db import (
     PlantDatabases,
@@ -35,6 +37,7 @@ from app.core.errors import AppError
 from app.domain.static_config import load_static_config
 
 logger = logging.getLogger("prodash.main")
+access_logger = logging.getLogger("prodash.access")
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -117,7 +120,10 @@ async def _validation_exception_handler(request: Request, exc: Exception) -> JSO
 
 async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return _error_response(request, exc.http_status, exc.code, exc.message, exc.details)
+    response = _error_response(request, exc.http_status, exc.code, exc.message, exc.details)
+    if exc.http_status == 401:
+        response.headers["WWW-Authenticate"] = "Bearer"
+    return response
 
 
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -149,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.central_engine = engine
         app.state.central_sessionmaker = create_central_sessionmaker(engine)
         app.state.plant_databases = PlantDatabases(cfg)
+        app.state.response_cache = TTLCache(cfg.response_cache_ttl_s, cfg.response_cache_max_entries)
         logger.info("startup complete env=%s", cfg.app_env)
         try:
             yield
@@ -174,8 +181,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
         request.state.request_id = request_id
+        started = time.perf_counter()
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
+        access_logger.info(
+            "request method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            (time.perf_counter() - started) * 1000,
+            request_id,
+        )
         return response
 
     if cfg.cors_origins:
